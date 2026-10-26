@@ -186,17 +186,16 @@ class GPT2Block(nn.Module):
     def __init__(self, d_model, n_heads, dropout):
         super().__init__()
 
-        # Pre-normalization before attention and the feed-forward network.
         self.ln_1 = nn.LayerNorm(d_model)
         self.attn = CausalSelfAttention(d_model, n_heads, dropout)
         self.ln_2 = nn.LayerNorm(d_model)
         self.mlp = GPT2MLP(d_model, dropout)
 
     def forward(self, x):
-        # First residual connection: causal self-attention.
+        # Pre-norm attention with a residual connection.
         x = x + self.attn(self.ln_1(x))
 
-        # Second residual connection: feed-forward network.
+        # Pre-norm feed-forward network with a residual connection.
         x = x + self.mlp(self.ln_2(x))
 
         return x
@@ -220,57 +219,51 @@ class GPT2(nn.Module):
         self.wte = nn.Embedding(vocab_size, d_model)
         self.wpe = nn.Embedding(block_size, d_model)
 
-        # Embedding dropout.
         self.drop = nn.Dropout(dropout)
 
-        # Stack of GPT-2 transformer blocks.
+        # Transformer blocks.
         self.blocks = nn.ModuleList([
             GPT2Block(d_model, n_heads, dropout)
             for _ in range(n_layers)
         ])
 
-        # Final LayerNorm and language-model output projection.
         self.ln_f = nn.LayerNorm(d_model)
+
+        # Output projection without a separate bias.
         self.head = nn.Linear(d_model, vocab_size, bias=False)
 
-        # GPT-2 initialization: normal weights with std=0.02,
-        # and zero biases for linear layers.
-        self.apply(self._init_weights)
-
-        # Tie the output projection weights to the token embeddings.
+        # Tie the output weights to the token embeddings before initialization.
         self.head.weight = self.wte.weight
 
+        # Initialize Linear and Embedding weights using GPT-2's specified
+        # normal distribution; initialize Linear biases to zero.
+        self.apply(self._init_weights)
+
     def _init_weights(self, module):
-        # Initialize all linear and embedding weights.
         if isinstance(module, (nn.Linear, nn.Embedding)):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-            # Linear-layer biases are initialized to zero.
             if isinstance(module, nn.Linear) and module.bias is not None:
                 nn.init.zeros_(module.bias)
 
     def forward(self, idx):
-        # idx has shape (B, T), containing character token IDs.
+        # idx shape: (B, T)
         B, T = idx.shape
 
-        # Ensure the input sequence fits within the positional embeddings.
         if T > self.block_size:
             raise ValueError(
                 f"Sequence length {T} exceeds block_size {self.block_size}"
             )
 
-        # Generate absolute position indices on the same device as idx.
+        # Add token and learned positional embeddings.
         pos = torch.arange(T, device=idx.device)
+        x = self.drop(self.wte(idx) + self.wpe(pos))
 
-        # Combine token and positional embeddings, then apply dropout.
-        x = self.wte(idx) + self.wpe(pos)
-        x = self.drop(x)
-
-        # Pass the input through all transformer blocks.
+        # Apply all transformer blocks.
         for block in self.blocks:
             x = block(x)
 
-        # Final normalization and vocabulary logits.
+        # Normalize and produce vocabulary logits.
         x = self.ln_f(x)
         logits = self.head(x)
 
@@ -320,4 +313,61 @@ def evaluate_bpc(model, data, block_size, batch_size=16, n_batches=8, seed=0):
 
     # For character-level tokenization, this is bits per character (BPC).
     return float(mean_loss / math.log(2))
+
+# Step 8 - train_lm
+def train_lm(model, data, steps, block_size, batch_size=32, lr=3e-3, seed=0):
+    # Seed PyTorch for reproducible initialization of random operations.
+    torch.manual_seed(seed)
+
+    # Use a dedicated generator to make training batches reproducible.
+    g = torch.Generator().manual_seed(seed)
+
+    # AdamW optimizer with the specified GPT-2 baseline training settings.
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=lr,
+        betas=(0.9, 0.95),
+        weight_decay=0.1
+    )
+
+    # Store the training loss from every optimization step.
+    losses = []
+
+    # Enable training mode, including dropout.
+    model.train()
+
+    for _ in range(steps):
+        # Sample a batch of input sequences and next-character targets.
+        x, y = get_batch(
+            data,
+            block_size,
+            batch_size,
+            generator=g
+        )
+
+        # Clear gradients from the previous optimization step.
+        optimizer.zero_grad(set_to_none=True)
+
+        # Forward pass: logits have shape (batch_size, block_size, vocab_size).
+        logits = model(x)
+
+        # Compute mean cross-entropy across all batch positions.
+        loss = F.cross_entropy(
+            logits.reshape(-1, logits.size(-1)),
+            y.reshape(-1)
+        )
+
+        # Backpropagate the loss.
+        loss.backward()
+
+        # Clip the global gradient norm to 1.0 for training stability.
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+        # Update model parameters.
+        optimizer.step()
+
+        # Record the loss as a Python float.
+        losses.append(float(loss.item()))
+
+    return losses
 

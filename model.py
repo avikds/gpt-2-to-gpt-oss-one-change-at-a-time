@@ -89,7 +89,6 @@ def get_batch(data, block_size, batch_size, generator=None):
 import math
 import torch.nn as nn
 
-
 class CausalSelfAttention(nn.Module):
     def __init__(self, d_model, n_heads, dropout=0.0):
         super().__init__()

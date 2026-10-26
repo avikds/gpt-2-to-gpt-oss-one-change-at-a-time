@@ -926,3 +926,34 @@ class TinyLM(nn.Module):
         x = self.norm_f(x)
         return self.head(x)
 
+# Step 22 - param_report
+def param_report(model):
+    # Count all unique parameters; tied weights are counted only once.
+    total = sum(p.numel() for p in model.parameters())
+
+    # Dense models use all parameters during each token's forward pass.
+    active = total
+
+    # Subtract the parameters of experts that are not selected per token.
+    for module in model.modules():
+        if isinstance(module, MoEMLP):
+            n_experts = len(module.experts)
+            k = module.k
+
+            # Each expert has the same architecture and parameter count.
+            if n_experts > 0:
+                expert_params = sum(
+                    p.numel() for p in module.experts[0].parameters()
+                )
+
+                active -= (n_experts - k) * expert_params
+
+    # Count token embedding parameters.
+    embedding = model.wte.weight.numel()
+
+    return {
+        "total": int(total),
+        "active": int(active),
+        "embedding": int(embedding),
+    }
+

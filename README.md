@@ -31,6 +31,7 @@ python scaffold.py
 - [x] **19.** OssAttention
 - [x] **20.** kv_cache_bytes
 - [x] **21.** TinyLM
+- [x] **22.** param_report
 
 ---
 

@@ -23,6 +23,7 @@ python scaffold.py
 - [x] **11.** apply_rope
 - [x] **12.** yarn_inv_freq
 - [x] **13.** swiglu_oss
+- [x] **14.** SwiGLUMLP
 
 ---
 

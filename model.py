@@ -483,3 +483,23 @@ def swiglu_oss(x, alpha=1.702, limit=7.0):
     # Apply gpt-oss's gated activation.
     return x_glu * torch.sigmoid(alpha * x_glu) * (x_linear + 1)
 
+# Step 14 - SwiGLUMLP
+class SwiGLUMLP(nn.Module):
+    def __init__(self, d_model, hidden):
+        super().__init__()
+
+        # Project to 2 * hidden dimensions for interleaved gate and linear values.
+        self.fc1 = nn.Linear(d_model, 2 * hidden)
+
+        # Project the activated hidden representation back to d_model.
+        self.fc2 = nn.Linear(hidden, d_model)
+
+    def forward(self, x):
+        # Apply the first projection, gpt-oss SwiGLU activation,
+        # and final projection.
+        x = self.fc1(x)
+        x = swiglu_oss(x)
+        x = self.fc2(x)
+
+        return x
+

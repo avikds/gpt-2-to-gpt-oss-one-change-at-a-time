@@ -61,3 +61,27 @@ class CharTokenizer:
         # Convert token IDs back to a string.
         return "".join(self.itos[int(i)] for i in ids)
 
+# Step 3 - get_batch
+def get_batch(data, block_size, batch_size, generator=None):
+    # Randomly sample starting positions for training windows.
+    starts = torch.randint(
+        0,
+        len(data) - block_size - 1,
+        (batch_size,),
+        generator=generator
+    )
+
+    # Input windows: characters from position s to s + block_size - 1.
+    x = torch.stack([
+        data[int(s):int(s) + block_size]
+        for s in starts
+    ]).long()
+
+    # Target windows: the same sequences shifted one character to the right.
+    y = torch.stack([
+        data[int(s) + 1:int(s) + block_size + 1]
+        for s in starts
+    ]).long()
+
+    return x, y
+

@@ -12,6 +12,7 @@ python scaffold.py
 
 - [x] **1.** fetch_stories
 - [x] **2.** CharTokenizer
+- [x] **3.** get_batch
 
 ---
 

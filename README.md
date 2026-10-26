@@ -27,6 +27,7 @@ python scaffold.py
 - [x] **15.** route_topk
 - [x] **16.** MoEMLP
 - [x] **17.** RMSNorm
+- [x] **18.** attention_mask
 
 ---
 

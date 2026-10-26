@@ -1093,3 +1093,54 @@ def context_extension(model, data, eval_len, factor, train_len,
         "yarn": float(yarn_loss),
     }
 
+# Step 26 - ablation_row
+def ablation_row(name, cfg, train_data, val_data, steps, seed=0,
+                 context_len=1024, quantize=False):
+    # Seed PyTorch for reproducible model initialization and training.
+    torch.manual_seed(seed)
+
+    # Build the model from the supplied configuration.
+    model = TinyLM(cfg)
+
+    # Train using the shared training loop and its default batch size and
+    # learning rate, passing the requested seed for reproducibility.
+    train_lm(
+        model,
+        train_data,
+        steps,
+        cfg["block_size"],
+        seed=seed,
+    )
+
+    # Optionally quantize all expert weight matrices to MXFP4.
+    if quantize:
+        quantize_experts_mxfp4(model)
+
+    # Evaluate validation bits per character.
+    bpc = evaluate_bpc(
+        model,
+        val_data,
+        cfg["block_size"],
+    )
+
+    # Count total and active parameters.
+    report = param_report(model)
+
+    # Calculate KV-cache memory for the specified inference context length.
+    kv_bytes = kv_cache_bytes(
+        cfg["n_kv_heads"],
+        cfg["d_model"] // cfg["n_heads"],
+        model.windows,
+        context_len,
+    )
+
+    # Return one complete row for the architecture comparison.
+    return {
+        "name": name,
+        "bpc": float(bpc),
+        "total": int(report["total"]),
+        "active": int(report["active"]),
+        "kv_bytes": int(kv_bytes),
+        "model": model,
+    }
+

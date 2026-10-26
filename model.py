@@ -733,3 +733,29 @@ class OssAttention(nn.Module):
 
         return self.out(out)
 
+# Step 20 - kv_cache_bytes
+def kv_cache_bytes(n_kv_heads, head_dim, windows, context_len, bytes_per_value=2):
+    total_bytes = 0
+
+    # Calculate the KV-cache memory required by each layer.
+    for window in windows:
+        # Full attention caches the entire context; sliding-window
+        # attention caches at most the configured window size.
+        cached_tokens = (
+            context_len if window is None
+            else min(context_len, window)
+        )
+
+        # Both keys and values must be stored for every cached token.
+        layer_bytes = (
+            2
+            * n_kv_heads
+            * head_dim
+            * cached_tokens
+            * bytes_per_value
+        )
+
+        total_bytes += layer_bytes
+
+    return int(total_bytes)
+

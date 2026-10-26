@@ -18,6 +18,7 @@ python scaffold.py
 - [x] **6.** GPT2
 - [x] **7.** evaluate_bpc
 - [x] **8.** train_lm
+- [x] **9.** set_dropout
 
 ---
 

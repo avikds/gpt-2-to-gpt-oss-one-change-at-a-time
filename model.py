@@ -371,3 +371,16 @@ def train_lm(model, data, steps, block_size, batch_size=32, lr=3e-3, seed=0):
 
     return losses
 
+# Step 9 - set_dropout
+def set_dropout(model, p):
+    # Update the dropout probability for every dropout module in the model.
+    count = 0
+
+    for module in model.modules():
+        if isinstance(module, nn.Dropout):
+            module.p = p
+            count += 1
+
+    # Return the number of dropout modules updated.
+    return count
+

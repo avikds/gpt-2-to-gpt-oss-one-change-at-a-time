@@ -1050,3 +1050,46 @@ def quantize_experts_mxfp4(model, block_size=32):
 
     return int(quantized_count)
 
+# Step 25 - context_extension
+def context_extension(model, data, eval_len, factor, train_len,
+                      ntk_alpha=1.0, ntk_beta=8.0):
+    # Read the RoPE configuration from TinyLM.
+    cfg = model.cfg
+    head_dim = cfg["d_model"] // cfg["n_heads"]
+    base = cfg["rope_base"]
+
+    # Preserve the original RoPE frequencies for evaluation and restoration.
+    original = rope_inv_freq(head_dim, base)
+
+    # Evaluate the model with ordinary RoPE at the training context length
+    # and the longer evaluation context length.
+    model.set_rope(original, 1.0)
+    train_loss = evaluate_bpc(model, data, train_len)
+    plain_loss = evaluate_bpc(model, data, eval_len)
+
+    try:
+        # Compute YaRN-rescaled frequencies for context extension.
+        concentration, inv_freq = yarn_inv_freq(
+            head_dim,
+            base,
+            factor,
+            train_len,
+            ntk_alpha,
+            ntk_beta,
+        )
+
+        # Evaluate the longer context using YaRN.
+        model.set_rope(inv_freq, concentration)
+        yarn_loss = evaluate_bpc(model, data, eval_len)
+
+    finally:
+        # Restore the original RoPE configuration.
+        model.set_rope(original, 1.0)
+
+    # Return all measurements as Python floats.
+    return {
+        "train_len": float(train_loss),
+        "plain": float(plain_loss),
+        "yarn": float(yarn_loss),
+    }
+

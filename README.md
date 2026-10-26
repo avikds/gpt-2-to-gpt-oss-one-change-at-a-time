@@ -34,6 +34,7 @@ python scaffold.py
 - [x] **22.** param_report
 - [x] **23.** mxfp4_fake_quant
 - [x] **24.** quantize_experts_mxfp4
+- [x] **25.** context_extension
 
 ---
 

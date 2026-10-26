@@ -957,3 +957,66 @@ def param_report(model):
         "embedding": int(embedding),
     }
 
+# Step 23 - mxfp4_fake_quant
+FP4_E2M1 = torch.tensor([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0])
+
+
+def mxfp4_fake_quant(w, block_size=32):
+    # Detach the weights and perform quantization calculations in float32.
+    original_dtype = w.dtype
+    x = w.detach().to(dtype=torch.float32)
+
+    rows, cols = x.shape
+
+    if block_size <= 0 or cols % block_size != 0:
+        raise ValueError("cols must be divisible by a positive block_size")
+
+    # Split each row into consecutive blocks.
+    blocks = x.reshape(rows, cols // block_size, block_size)
+
+    # Calculate the maximum absolute value for every block.
+    amax = blocks.abs().amax(dim=-1, keepdim=True)
+
+    # MXFP4 uses a shared power-of-two scale:
+    # scale = 2 ** (floor(log2(amax)) - 2).
+    # All-zero blocks use scale 1.
+    safe_amax = torch.where(
+        amax > 0,
+        amax,
+        torch.ones_like(amax),
+    )
+
+    exponent = torch.floor(torch.log2(safe_amax)) - 2.0
+    scale = torch.pow(2.0, exponent)
+    scale = torch.where(amax > 0, scale, torch.ones_like(scale))
+
+    # Normalize magnitudes and clip to the representable maximum.
+    magnitude = (blocks.abs() / scale).clamp(max=6.0)
+
+    # Move the E2M1 lookup grid to the correct device.
+    grid = FP4_E2M1.to(device=w.device, dtype=torch.float32)
+
+    # Find the closest representable magnitude for each value.
+    distances = (magnitude.unsqueeze(-1) - grid).abs()
+    min_distance = distances.min(dim=-1, keepdim=True).values
+    is_nearest = distances == min_distance
+
+    # For exact ties, choose the even FP4 code (grid index).
+    codes = torch.arange(8, device=w.device)
+    even_candidates = is_nearest & (codes.remainder(2) == 0)
+
+    candidates = torch.where(
+        even_candidates.any(dim=-1, keepdim=True),
+        even_candidates,
+        is_nearest,
+    )
+
+    indices = candidates.to(torch.int64).argmax(dim=-1)
+    quantized_magnitude = grid[indices]
+
+    # Restore signs and dequantize using the shared block scale.
+    dequantized = blocks.sign() * quantized_magnitude * scale
+
+    # Restore the original matrix shape and dtype.
+    return dequantized.reshape(rows, cols).to(dtype=original_dtype)
+

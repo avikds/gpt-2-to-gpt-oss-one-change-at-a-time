@@ -32,6 +32,7 @@ python scaffold.py
 - [x] **20.** kv_cache_bytes
 - [x] **21.** TinyLM
 - [x] **22.** param_report
+- [x] **23.** mxfp4_fake_quant
 
 ---
 

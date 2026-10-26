@@ -11,6 +11,7 @@ python scaffold.py
 ## Steps
 
 - [x] **1.** fetch_stories
+- [x] **2.** CharTokenizer
 
 ---
 

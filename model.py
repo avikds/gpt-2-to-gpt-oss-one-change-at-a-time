@@ -31,3 +31,33 @@ def fetch_stories(max_chars):
 
     return stories[:max_chars]
 
+# Step 2 - CharTokenizer
+import torch
+
+class CharTokenizer:
+    def __init__(self, text):
+        # Build a sorted list of unique characters.
+        self.itos = sorted(set(text))
+
+        # Map each character to its integer index.
+        self.stoi = {ch: i for i, ch in enumerate(self.itos)}
+
+    def __len__(self):
+        # Return the vocabulary size.
+        return len(self.itos)
+
+    def encode(self, s):
+        # Convert characters to IDs, silently skipping unknown characters.
+        ids = [self.stoi[ch] for ch in s if ch in self.stoi]
+
+        # Return a 1-D tensor of type torch.long.
+        return torch.tensor(ids, dtype=torch.long)
+
+    def decode(self, ids):
+        # Support both Python lists and 1-D PyTorch tensors.
+        if isinstance(ids, torch.Tensor):
+            ids = ids.tolist()
+
+        # Convert token IDs back to a string.
+        return "".join(self.itos[int(i)] for i in ids)
+

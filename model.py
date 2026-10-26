@@ -384,3 +384,16 @@ def set_dropout(model, p):
     # Return the number of dropout modules updated.
     return count
 
+# Step 10 - rope_inv_freq
+def rope_inv_freq(head_dim, base):
+    # Indices for each pair of dimensions.
+    i = torch.arange(head_dim // 2, dtype=torch.float32)
+
+    # Compute rotary frequencies: base^(-2i / head_dim).
+    inv_freq = torch.pow(
+        torch.tensor(float(base), dtype=torch.float32),
+        -2.0 * i / head_dim
+    )
+
+    return inv_freq
+

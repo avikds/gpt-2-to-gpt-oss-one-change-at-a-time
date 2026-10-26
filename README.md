@@ -15,6 +15,7 @@ python scaffold.py
 - [x] **3.** get_batch
 - [x] **4.** CausalSelfAttention
 - [x] **5.** GPT2MLP
+- [x] **6.** GPT2
 
 ---
 

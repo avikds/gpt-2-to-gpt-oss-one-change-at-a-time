@@ -181,3 +181,98 @@ class GPT2MLP(nn.Module):
 
         return x
 
+# Step 6 - GPT2
+class GPT2Block(nn.Module):
+    def __init__(self, d_model, n_heads, dropout):
+        super().__init__()
+
+        # Pre-normalization before attention and the feed-forward network.
+        self.ln_1 = nn.LayerNorm(d_model)
+        self.attn = CausalSelfAttention(d_model, n_heads, dropout)
+        self.ln_2 = nn.LayerNorm(d_model)
+        self.mlp = GPT2MLP(d_model, dropout)
+
+    def forward(self, x):
+        # First residual connection: causal self-attention.
+        x = x + self.attn(self.ln_1(x))
+
+        # Second residual connection: feed-forward network.
+        x = x + self.mlp(self.ln_2(x))
+
+        return x
+
+
+class GPT2(nn.Module):
+    def __init__(
+        self,
+        vocab_size,
+        d_model,
+        n_layers,
+        n_heads,
+        block_size,
+        dropout=0.1
+    ):
+        super().__init__()
+
+        self.block_size = block_size
+
+        # Token embeddings and learned absolute positional embeddings.
+        self.wte = nn.Embedding(vocab_size, d_model)
+        self.wpe = nn.Embedding(block_size, d_model)
+
+        # Embedding dropout.
+        self.drop = nn.Dropout(dropout)
+
+        # Stack of GPT-2 transformer blocks.
+        self.blocks = nn.ModuleList([
+            GPT2Block(d_model, n_heads, dropout)
+            for _ in range(n_layers)
+        ])
+
+        # Final LayerNorm and language-model output projection.
+        self.ln_f = nn.LayerNorm(d_model)
+        self.head = nn.Linear(d_model, vocab_size, bias=False)
+
+        # GPT-2 initialization: normal weights with std=0.02,
+        # and zero biases for linear layers.
+        self.apply(self._init_weights)
+
+        # Tie the output projection weights to the token embeddings.
+        self.head.weight = self.wte.weight
+
+    def _init_weights(self, module):
+        # Initialize all linear and embedding weights.
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+            # Linear-layer biases are initialized to zero.
+            if isinstance(module, nn.Linear) and module.bias is not None:
+                nn.init.zeros_(module.bias)
+
+    def forward(self, idx):
+        # idx has shape (B, T), containing character token IDs.
+        B, T = idx.shape
+
+        # Ensure the input sequence fits within the positional embeddings.
+        if T > self.block_size:
+            raise ValueError(
+                f"Sequence length {T} exceeds block_size {self.block_size}"
+            )
+
+        # Generate absolute position indices on the same device as idx.
+        pos = torch.arange(T, device=idx.device)
+
+        # Combine token and positional embeddings, then apply dropout.
+        x = self.wte(idx) + self.wpe(pos)
+        x = self.drop(x)
+
+        # Pass the input through all transformer blocks.
+        for block in self.blocks:
+            x = block(x)
+
+        # Final normalization and vocabulary logits.
+        x = self.ln_f(x)
+        logits = self.head(x)
+
+        return logits
+

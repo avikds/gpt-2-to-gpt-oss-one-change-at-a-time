@@ -21,6 +21,7 @@ python scaffold.py
 - [x] **9.** set_dropout
 - [x] **10.** rope_inv_freq
 - [x] **11.** apply_rope
+- [x] **12.** yarn_inv_freq
 
 ---
 

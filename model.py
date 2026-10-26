@@ -421,3 +421,52 @@ def apply_rope(x, inv_freq, positions, concentration=1.0):
     # Concatenate the rotated halves to restore the original shape.
     return torch.cat((rotated_first, rotated_second), dim=-1)
 
+# Step 12 - yarn_inv_freq
+def yarn_inv_freq(head_dim, base, factor, initial_context, ntk_alpha=1.0, ntk_beta=32.0):
+    # Reciprocal of the standard RoPE inverse frequencies.
+    freq = torch.pow(
+        torch.tensor(float(base), dtype=torch.float32),
+        torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim
+    )
+
+    # No context extension: use standard RoPE frequencies.
+    if factor <= 1:
+        return 1.0, 1.0 / freq
+
+    # YaRN attention concentration factor.
+    concentration = 0.1 * math.log(factor) + 1.0
+
+    # Compute the low and high correction dimensions for NTK-by-parts.
+    d_half = head_dim // 2
+
+    low = (
+        d_half
+        * math.log(initial_context / (ntk_beta * 2 * math.pi))
+        / math.log(base)
+    )
+
+    high = (
+        d_half
+        * math.log(initial_context / (ntk_alpha * 2 * math.pi))
+        / math.log(base)
+    )
+
+    assert 0 < low < high < d_half - 1
+
+    # Interpolated frequencies stretch the context; extrapolated
+    # frequencies retain the original RoPE behavior.
+    interpolation = 1.0 / (factor * freq)
+    extrapolation = 1.0 / freq
+
+    # Build a smooth transition mask between the two frequency ranges.
+    ramp = (
+        torch.arange(d_half, dtype=torch.float32) - low
+    ) / (high - low)
+
+    mask = 1.0 - ramp.clamp(0.0, 1.0)
+
+    # Blend interpolated and extrapolated frequencies.
+    inv_freq = interpolation * (1.0 - mask) + extrapolation * mask
+
+    return float(concentration), inv_freq
+

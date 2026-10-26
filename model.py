@@ -524,3 +524,57 @@ def route_topk(router_logits, k):
 
     return weights, indices
 
+# Step 16 - MoEMLP
+class MoEMLP(nn.Module):
+    def __init__(self, d_model, n_experts, k, hidden):
+        super().__init__()
+
+        # Number of experts selected for each token.
+        self.k = k
+
+        # Router produces one score per expert for each token.
+        self.gate = nn.Linear(d_model, n_experts)
+
+        # Create the expert feed-forward networks.
+        self.experts = nn.ModuleList([
+            SwiGLUMLP(d_model, hidden)
+            for _ in range(n_experts)
+        ])
+
+    def forward(self, x):
+        # Preserve the original shape so the output can be restored.
+        original_shape = x.shape
+
+        # Flatten all leading dimensions into a single token dimension.
+        tokens = x.reshape(-1, original_shape[-1])
+
+        # Select the top-k experts and normalize their routing weights.
+        router_logits = self.gate(tokens)
+        weights, indices = route_topk(router_logits, self.k)
+
+        # Initialize the output for all tokens.
+        output = torch.zeros_like(tokens)
+
+        # Process only the tokens assigned to each expert.
+        for expert_idx, expert in enumerate(self.experts):
+            # Locate token and top-k slot pairs assigned to this expert.
+            token_idx, slot_idx = torch.where(indices == expert_idx)
+
+            # Skip experts that receive no tokens.
+            if token_idx.numel() == 0:
+                continue
+
+            # Run this expert only on its assigned tokens.
+            expert_input = tokens.index_select(0, token_idx)
+            expert_output = expert(expert_input)
+
+            # Weight each expert output by its routing probability.
+            routing_weights = weights[token_idx, slot_idx].unsqueeze(-1)
+            weighted_output = expert_output * routing_weights
+
+            # Accumulate weighted outputs for the corresponding tokens.
+            output.index_add_(0, token_idx, weighted_output)
+
+        # Restore the original input shape.
+        return output.reshape(original_shape)
+

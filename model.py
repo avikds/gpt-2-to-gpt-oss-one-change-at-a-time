@@ -1020,3 +1020,33 @@ def mxfp4_fake_quant(w, block_size=32):
     # Restore the original matrix shape and dtype.
     return dequantized.reshape(rows, cols).to(dtype=original_dtype)
 
+# Step 24 - quantize_experts_mxfp4
+def quantize_experts_mxfp4(model, block_size=32):
+    # Count the number of weight values quantized across all experts.
+    quantized_count = 0
+
+    # Quantization updates parameter values in place without tracking gradients.
+    with torch.no_grad():
+        for module in model.modules():
+            if isinstance(module, MoEMLP):
+                for expert in module.experts:
+                    # Quantize the first projection's weights.
+                    expert.fc1.weight.copy_(
+                        mxfp4_fake_quant(
+                            expert.fc1.weight,
+                            block_size=block_size,
+                        )
+                    )
+                    quantized_count += expert.fc1.weight.numel()
+
+                    # Quantize the second projection's weights.
+                    expert.fc2.weight.copy_(
+                        mxfp4_fake_quant(
+                            expert.fc2.weight,
+                            block_size=block_size,
+                        )
+                    )
+                    quantized_count += expert.fc2.weight.numel()
+
+    return int(quantized_count)
+

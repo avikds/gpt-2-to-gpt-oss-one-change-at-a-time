@@ -85,3 +85,74 @@ def get_batch(data, block_size, batch_size, generator=None):
 
     return x, y
 
+# Step 4 - CausalSelfAttention
+import math
+import torch.nn as nn
+
+
+class CausalSelfAttention(nn.Module):
+    def __init__(self, d_model, n_heads, dropout=0.0):
+        super().__init__()
+
+        # Ensure the model dimension can be divided evenly across attention heads.
+        if d_model % n_heads != 0:
+            raise ValueError("d_model must be divisible by n_heads")
+
+        self.n_heads = n_heads
+        self.head_dim = d_model // n_heads
+
+        # Project the input into queries, keys, and values in a single operation.
+        self.qkv = nn.Linear(d_model, 3 * d_model)
+
+        # Project the concatenated attention heads back to d_model dimensions.
+        self.proj = nn.Linear(d_model, d_model)
+
+        # Dropout applied to attention weights and the residual output.
+        self.attn_drop = nn.Dropout(dropout)
+        self.resid_drop = nn.Dropout(dropout)
+
+    def forward(self, x):
+        # x has shape (B, T, d_model).
+        B, T, C = x.shape
+
+        # Compute Q, K, V and split them into individual attention heads.
+        # Shape after reshape: (B, T, 3, n_heads, head_dim).
+        # Shape after permute: (3, B, n_heads, T, head_dim).
+        qkv = self.qkv(x).reshape(
+            B, T, 3, self.n_heads, self.head_dim
+        ).permute(2, 0, 3, 1, 4)
+
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        # Compute scaled dot-product attention scores.
+        # Result shape: (B, n_heads, T, T).
+        scores = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
+
+        # Create a causal mask that blocks access to future positions.
+        causal_mask = torch.triu(
+            torch.ones(T, T, dtype=torch.bool, device=x.device),
+            diagonal=1
+        )
+
+        # Set future-position scores to negative infinity.
+        scores = scores.masked_fill(causal_mask, float("-inf"))
+
+        # Normalize scores into attention weights.
+        weights = torch.softmax(scores, dim=-1)
+
+        # Apply dropout to attention weights.
+        weights = self.attn_drop(weights)
+
+        # Apply attention weights to values.
+        # Shape: (B, n_heads, T, head_dim).
+        out = weights @ v
+
+        # Merge attention heads back into (B, T, d_model).
+        out = out.transpose(1, 2).contiguous().view(B, T, C)
+
+        # Apply output projection and residual dropout.
+        out = self.proj(out)
+        out = self.resid_drop(out)
+
+        return out
+

@@ -16,6 +16,7 @@ python scaffold.py
 - [x] **4.** CausalSelfAttention
 - [x] **5.** GPT2MLP
 - [x] **6.** GPT2
+- [x] **7.** evaluate_bpc
 
 ---
 

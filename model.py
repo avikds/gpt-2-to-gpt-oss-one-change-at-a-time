@@ -276,3 +276,48 @@ class GPT2(nn.Module):
 
         return logits
 
+# Step 7 - evaluate_bpc
+def evaluate_bpc(model, data, block_size, batch_size=16, n_batches=8, seed=0):
+    # Remember the original training/evaluation mode.
+    was_training = model.training
+
+    # Switch to evaluation mode to disable dropout.
+    model.eval()
+
+    # Use a fixed random seed to make evaluation batches reproducible.
+    generator = torch.Generator().manual_seed(seed)
+    losses = []
+
+    try:
+        # Disable gradient tracking during evaluation.
+        with torch.no_grad():
+            for _ in range(n_batches):
+                # Sample a batch of input sequences and next-character targets.
+                x, y = get_batch(
+                    data,
+                    block_size,
+                    batch_size,
+                    generator=generator
+                )
+
+                # Compute model logits: (batch_size, block_size, vocab_size).
+                logits = model(x)
+
+                # Compute mean cross-entropy in nats over all batch positions.
+                loss = F.cross_entropy(
+                    logits.reshape(-1, logits.size(-1)),
+                    y.reshape(-1)
+                )
+
+                losses.append(loss.item())
+
+    finally:
+        # Restore the model's original mode, even if evaluation raises an error.
+        model.train(was_training)
+
+    # Average cross-entropy across batches and convert nats to bits.
+    mean_loss = sum(losses) / len(losses)
+
+    # For character-level tokenization, this is bits per character (BPC).
+    return float(mean_loss / math.log(2))
+

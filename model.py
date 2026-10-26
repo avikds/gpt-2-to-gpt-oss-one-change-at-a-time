@@ -155,3 +155,29 @@ class CausalSelfAttention(nn.Module):
 
         return out
 
+# Step 5 - GPT2MLP
+import torch.nn.functional as F
+
+class GPT2MLP(nn.Module):
+    def __init__(self, d_model, dropout=0.0):
+        super().__init__()
+
+        # Expand the hidden dimension from d_model to 4 * d_model.
+        self.fc = nn.Linear(d_model, 4 * d_model)
+
+        # Project the expanded representation back to d_model.
+        self.proj = nn.Linear(4 * d_model, d_model)
+
+        # Apply dropout to the projected output.
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x):
+        # Apply the first linear layer, GPT-2's tanh-approximated GELU,
+        # the output projection, and dropout in sequence.
+        x = self.fc(x)
+        x = F.gelu(x, approximate="tanh")
+        x = self.proj(x)
+        x = self.drop(x)
+
+        return x
+

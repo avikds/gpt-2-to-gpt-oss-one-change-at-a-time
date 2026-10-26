@@ -20,6 +20,7 @@ python scaffold.py
 - [x] **8.** train_lm
 - [x] **9.** set_dropout
 - [x] **10.** rope_inv_freq
+- [x] **11.** apply_rope
 
 ---
 

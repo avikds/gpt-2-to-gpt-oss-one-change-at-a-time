@@ -397,3 +397,27 @@ def rope_inv_freq(head_dim, base):
 
     return inv_freq
 
+# Step 11 - apply_rope
+def apply_rope(x, inv_freq, positions, concentration=1.0):
+    # Compute rotary angles in float32 on the same device as x.
+    positions = positions.to(device=x.device, dtype=torch.float32)
+    inv_freq = inv_freq.to(device=x.device, dtype=torch.float32)
+
+    # Outer product: (T,) x (head_dim // 2,)
+    # produces angles of shape (T, head_dim // 2).
+    angles = torch.outer(positions, inv_freq)
+
+    # Compute cosine and sine, applying the concentration factor.
+    cos = (torch.cos(angles) * concentration).to(dtype=x.dtype)
+    sin = (torch.sin(angles) * concentration).to(dtype=x.dtype)
+
+    # Split the last dimension into two halves (GPT-OSS half-split layout).
+    x1, x2 = torch.chunk(x, 2, dim=-1)
+
+    # Rotate each pair of dimensions according to its position.
+    rotated_first = x1 * cos - x2 * sin
+    rotated_second = x2 * cos + x1 * sin
+
+    # Concatenate the rotated halves to restore the original shape.
+    return torch.cat((rotated_first, rotated_second), dim=-1)
+

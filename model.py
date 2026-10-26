@@ -621,3 +621,115 @@ def attention_mask(T, window=None):
 
     return allowed
 
+# Step 19 - OssAttention
+class OssAttention(nn.Module):
+    def __init__(self, d_model, n_heads, n_kv_heads, window=None, sinks=False):
+        super().__init__()
+
+        # Grouped-query attention requires query heads to divide evenly
+        # into groups sharing key/value heads.
+        assert n_heads % n_kv_heads == 0, (
+            "n_heads must be divisible by n_kv_heads"
+        )
+        assert d_model % n_heads == 0, (
+            "d_model must be divisible by n_heads"
+        )
+
+        self.n_heads = n_heads
+        self.n_kv_heads = n_kv_heads
+        self.head_dim = d_model // n_heads
+        self.window = window
+
+        # Query projection uses all attention heads.
+        self.q = nn.Linear(d_model, n_heads * self.head_dim)
+
+        # Key and value projections use fewer heads for GQA.
+        self.k = nn.Linear(d_model, n_kv_heads * self.head_dim)
+        self.v = nn.Linear(d_model, n_kv_heads * self.head_dim)
+
+        # Output projection merges the attention heads.
+        self.out = nn.Linear(n_heads * self.head_dim, d_model)
+
+        # One learned attention-sink logit per query head, when enabled.
+        self.sinks = (
+            nn.Parameter(torch.zeros(n_heads)) if sinks else None
+        )
+
+    def forward(self, x, inv_freq=None, concentration=1.0):
+        # Input shape: (B, T, d_model).
+        B, T, _ = x.shape
+
+        # Project queries, keys, and values, then split into heads.
+        q = self.q(x).reshape(
+            B, T, self.n_heads, self.head_dim
+        ).transpose(1, 2)
+
+        k = self.k(x).reshape(
+            B, T, self.n_kv_heads, self.head_dim
+        ).transpose(1, 2)
+
+        v = self.v(x).reshape(
+            B, T, self.n_kv_heads, self.head_dim
+        ).transpose(1, 2)
+
+        # Apply rotary positional embeddings when inverse frequencies
+        # are provided. Positions are shared across the batch.
+        if inv_freq is not None:
+            positions = torch.arange(T, device=x.device)
+
+            q = apply_rope(
+                q, inv_freq, positions, concentration
+            )
+            k = apply_rope(
+                k, inv_freq, positions, concentration
+            )
+
+        # Expand each key/value head across its associated query heads.
+        repeats = self.n_heads // self.n_kv_heads
+        k = k.repeat_interleave(repeats, dim=1)
+        v = v.repeat_interleave(repeats, dim=1)
+
+        # Scaled dot-product attention scores:
+        # (B, n_heads, T, T).
+        scores = (
+            q @ k.transpose(-2, -1)
+        ) / math.sqrt(self.head_dim)
+
+        # Apply the causal mask, optionally restricting attention
+        # to the current position and the preceding window - 1 positions.
+        allowed = attention_mask(T, self.window).to(device=x.device)
+        scores = scores.masked_fill(
+            ~allowed.unsqueeze(0).unsqueeze(0),
+            float("-inf")
+        )
+
+        if self.sinks is not None:
+            # Append one learned sink logit per attention head to every
+            # query row. The sink has no associated value vector.
+            sink_logits = self.sinks.to(
+                device=scores.device, dtype=scores.dtype
+            ).view(1, self.n_heads, 1, 1).expand(B, -1, T, -1)
+
+            scores_with_sink = torch.cat(
+                (scores, sink_logits), dim=-1
+            )
+
+            # Normalize over the real keys and the extra sink column.
+            weights = torch.softmax(scores_with_sink, dim=-1)
+
+            # Discard the sink weight: it consumes probability mass
+            # but contributes no value to the weighted sum.
+            weights = weights[..., :T]
+        else:
+            weights = torch.softmax(scores, dim=-1)
+
+        # Weighted sum of values: (B, n_heads, T, head_dim).
+        out = weights @ v
+
+        # Merge heads and project back to d_model.
+        out = out.transpose(1, 2).contiguous().reshape(
+            B, T, self.n_heads * self.head_dim
+        )
+
+        return self.out(out)
+

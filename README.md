@@ -28,6 +28,7 @@ python scaffold.py
 - [x] **16.** MoEMLP
 - [x] **17.** RMSNorm
 - [x] **18.** attention_mask
+- [x] **19.** OssAttention
 
 ---
 

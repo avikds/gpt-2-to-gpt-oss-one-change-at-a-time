@@ -503,3 +503,24 @@ class SwiGLUMLP(nn.Module):
 
         return x
 
+# Step 15 - route_topk
+def route_topk(router_logits, k):
+    # Sort expert scores in descending order using a stable sort.
+    # Equal scores retain their original order, so lower expert indices
+    # come first when scores are tied.
+    sorted_logits, sorted_indices = torch.sort(
+        router_logits,
+        dim=-1,
+        descending=True,
+        stable=True
+    )
+
+    # Keep only the top-k expert scores and their indices.
+    topk_logits = sorted_logits[..., :k]
+    indices = sorted_indices[..., :k]
+
+    # Normalize the selected scores using softmax over the top-k experts.
+    weights = torch.softmax(topk_logits, dim=-1)
+
+    return weights, indices
+

@@ -24,6 +24,7 @@ python scaffold.py
 - [x] **12.** yarn_inv_freq
 - [x] **13.** swiglu_oss
 - [x] **14.** SwiGLUMLP
+- [x] **15.** route_topk
 
 ---
 

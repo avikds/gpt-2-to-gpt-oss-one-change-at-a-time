@@ -759,3 +759,170 @@ def kv_cache_bytes(n_kv_heads, head_dim, windows, context_len, bytes_per_value=2
 
     return int(total_bytes)
 
+# Step 21 - TinyLM
+class TinyBlock(nn.Module):
+    def __init__(self, cfg, window):
+        super().__init__()
+
+        d_model = cfg["d_model"]
+        dropout = cfg["dropout"]
+
+        # Configurable normalization.
+        if cfg["norm"] == "layer":
+            self.norm1 = nn.LayerNorm(d_model)
+            self.norm2 = nn.LayerNorm(d_model)
+        elif cfg["norm"] == "rms":
+            self.norm1 = RMSNorm(d_model)
+            self.norm2 = RMSNorm(d_model)
+        else:
+            raise ValueError(f"Unsupported normalization: {cfg['norm']}")
+
+        # Grouped-query attention with optional sliding window and sinks.
+        self.attn = OssAttention(
+            d_model,
+            cfg["n_heads"],
+            cfg["n_kv_heads"],
+            window=window,
+            sinks=cfg["sinks"],
+        )
+
+        # Configurable feed-forward layer.
+        if cfg["mlp"] == "gelu":
+            self.mlp = GPT2MLP(d_model)
+        elif cfg["mlp"] == "swiglu":
+            self.mlp = SwiGLUMLP(d_model, cfg["hidden"])
+        elif cfg["mlp"] == "moe":
+            self.mlp = MoEMLP(
+                d_model,
+                cfg["n_experts"],
+                cfg["top_k"],
+                cfg["hidden"],
+            )
+        else:
+            raise ValueError(f"Unsupported MLP type: {cfg['mlp']}")
+
+        # Residual dropout.
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x, inv_freq, concentration):
+        # Pre-normalized attention with a residual connection.
+        x = x + self.drop(
+            self.attn(self.norm1(x), inv_freq, concentration)
+        )
+
+        # Pre-normalized feed-forward layer with a residual connection.
+        x = x + self.drop(self.mlp(self.norm2(x)))
+
+        return x
+
+
+class TinyLM(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+
+        self.cfg = dict(cfg)
+
+        vocab_size = cfg["vocab_size"]
+        d_model = cfg["d_model"]
+        n_layers = cfg["n_layers"]
+        block_size = cfg["block_size"]
+
+        # Alternate sliding-window and full-attention layers.
+        if cfg["window"] is None:
+            self.windows = [None] * n_layers
+        else:
+            self.windows = [
+                cfg["window"] if i % 2 == 0 else None
+                for i in range(n_layers)
+            ]
+
+        self.wte = nn.Embedding(vocab_size, d_model)
+
+        # Learned positional embeddings are only needed for learned mode.
+        if cfg["pos"] == "learned":
+            self.wpe = nn.Embedding(block_size, d_model)
+        elif cfg["pos"] == "rope":
+            self.wpe = None
+        else:
+            raise ValueError(f"Unsupported position type: {cfg['pos']}")
+
+        self.drop = nn.Dropout(cfg["dropout"])
+
+        self.blocks = nn.ModuleList([
+            TinyBlock(cfg, window)
+            for window in self.windows
+        ])
+
+        # Final normalization.
+        if cfg["norm"] == "layer":
+            self.norm_f = nn.LayerNorm(d_model)
+        else:
+            self.norm_f = RMSNorm(d_model)
+
+        # Tied token embedding and output projection weights.
+        self.head = nn.Linear(d_model, vocab_size, bias=False)
+        self.head.weight = self.wte.weight
+
+        # RoPE frequencies are a non-persistent buffer.
+        self.register_buffer(
+            "inv_freq",
+            rope_inv_freq(
+                d_model // cfg["n_heads"],
+                cfg["rope_base"],
+            ),
+            persistent=False,
+        )
+
+        self.concentration = 1.0
+
+        # GPT-2-style initialization.
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+            if isinstance(module, nn.Linear) and module.bias is not None:
+                nn.init.zeros_(module.bias)
+
+    def set_rope(self, inv_freq, concentration=1.0):
+        # Update rotary frequencies and the attention concentration factor.
+        self.inv_freq = inv_freq.to(
+            device=self.wte.weight.device,
+            dtype=torch.float32,
+        )
+        self.concentration = float(concentration)
+
+    def forward(self, idx):
+        # idx shape: (B, T).
+        B, T = idx.shape
+
+        # FIX: enforce block_size only for learned absolute positions.
+        # RoPE supports sequence lengths greater than block_size.
+        if self.wpe is not None and T > self.cfg["block_size"]:
+            raise ValueError(
+                f"Sequence length {T} exceeds block_size "
+                f"{self.cfg['block_size']}"
+            )
+
+        # Token embeddings.
+        x = self.wte(idx)
+
+        # Add learned positions only when a position table exists.
+        if self.wpe is not None:
+            positions = torch.arange(T, device=idx.device)
+            x = x + self.wpe(positions)
+
+        x = self.drop(x)
+
+        # Supply rotary frequencies only for RoPE models.
+        inv_freq = self.inv_freq if self.cfg["pos"] == "rope" else None
+
+        # Transformer blocks.
+        for block in self.blocks:
+            x = block(x, inv_freq, self.concentration)
+
+        # Final normalization and vocabulary logits.
+        x = self.norm_f(x)
+        return self.head(x)
+

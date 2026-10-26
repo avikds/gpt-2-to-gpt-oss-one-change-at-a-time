@@ -30,6 +30,7 @@ python scaffold.py
 - [x] **18.** attention_mask
 - [x] **19.** OssAttention
 - [x] **20.** kv_cache_bytes
+- [x] **21.** TinyLM
 
 ---
 

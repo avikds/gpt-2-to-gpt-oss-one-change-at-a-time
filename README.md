@@ -22,6 +22,7 @@ python scaffold.py
 - [x] **10.** rope_inv_freq
 - [x] **11.** apply_rope
 - [x] **12.** yarn_inv_freq
+- [x] **13.** swiglu_oss
 
 ---
 

@@ -470,3 +470,16 @@ def yarn_inv_freq(head_dim, base, factor, initial_context, ntk_alpha=1.0, ntk_be
 
     return float(concentration), inv_freq
 
+# Step 13 - swiglu_oss
+def swiglu_oss(x, alpha=1.702, limit=7.0):
+    # Split the interleaved input into gate and linear components.
+    x_glu = x[..., ::2]
+    x_linear = x[..., 1::2]
+
+    # Clamp the gate from above and the linear component on both sides.
+    x_glu = torch.clamp(x_glu, max=limit)
+    x_linear = torch.clamp(x_linear, min=-limit, max=limit)
+
+    # Apply gpt-oss's gated activation.
+    return x_glu * torch.sigmoid(alpha * x_glu) * (x_linear + 1)
+

@@ -578,3 +578,29 @@ class MoEMLP(nn.Module):
         # Restore the original input shape.
         return output.reshape(original_shape)
 
+# Step 17 - RMSNorm
+class RMSNorm(nn.Module):
+    def __init__(self, d_model, eps=1e-5):
+        super().__init__()
+
+        # Learnable scale parameter, initialized to ones.
+        self.scale = nn.Parameter(torch.ones(d_model))
+        self.eps = eps
+
+    def forward(self, x):
+        # Preserve the input dtype for the final output.
+        input_dtype = x.dtype
+
+        # Perform normalization calculations in float32 for numerical stability.
+        t = x.to(torch.float32)
+
+        # Compute the root-mean-square normalization factor.
+        rms_inv = torch.rsqrt(
+            torch.mean(t * t, dim=-1, keepdim=True) + self.eps
+        )
+
+        # Normalize and apply the learnable scale, then restore input dtype.
+        output = t * rms_inv * self.scale
+
+        return output.to(input_dtype)
+

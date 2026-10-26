@@ -26,6 +26,7 @@ python scaffold.py
 - [x] **14.** SwiGLUMLP
 - [x] **15.** route_topk
 - [x] **16.** MoEMLP
+- [x] **17.** RMSNorm
 
 ---
 
